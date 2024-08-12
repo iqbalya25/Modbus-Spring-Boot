@@ -1,0 +1,12 @@
+version: '3.8'
+services:
+  vfd-control:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    devices:
+      - "COM9:/dev/ttyS9"
+    environment:
+      - SERIAL_PORT=/dev/ttyS9
+    privileged: true
+    restart: unless-stopped

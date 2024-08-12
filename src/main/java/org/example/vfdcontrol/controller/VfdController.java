@@ -46,5 +46,10 @@ public class VfdController {
         }
     }
 
+    @GetMapping("/status")
+    public String getConnectionStatus() {
+        return vfdService.isConnected() ? "Connected" : "Disconnected";
+    }
+
 
 }

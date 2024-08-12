@@ -9,6 +9,7 @@ import com.ghgande.j2mod.modbus.util.SerialParameters;
 import org.example.vfdcontrol.service.VfdService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -19,10 +20,17 @@ public class VfdServiceImpl implements VfdService {
     private SerialConnection connection;
     private static final int MODBUS_DELAY = 500;
     private static final int SLAVE_ADDRESS= 1;
+    private boolean lastConnectionStatus = false;
 
     public VfdServiceImpl() {
         SerialParameters params = new SerialParameters();
-        params.setPortName("COM9");
+        String portName = System.getenv("SERIAL_PORT");
+        if (portName == null || portName.isEmpty()) {
+            portName = "/dev/ttyS9";  // fallback to default
+        }
+
+        logger.info("Attempting to use port: {}", portName);
+        params.setPortName(portName);
         params.setBaudRate(9600);
         params.setDatabits(8);
         params.setParity(2);  // Even parity
@@ -33,9 +41,24 @@ public class VfdServiceImpl implements VfdService {
         connection = new SerialConnection(params);
         try {
             connection.open();
-            logger.info("Serial connection opened successfully");
+            lastConnectionStatus = true;
+            logger.info("Serial connection opened successfully on port: {}", portName);
         } catch (Exception e) {
-            logger.error("Failed to open serial connection", e);
+            logger.error("Failed to open serial connection on port: {}", portName, e);
+            lastConnectionStatus = false;
+        }
+    }
+
+    @Scheduled(fixedDelay = 5000)
+    public void monitorConnectionStatus() {
+        boolean currentStatus = isConnected();
+        if (currentStatus != lastConnectionStatus) {
+            if (currentStatus) {
+                logger.info("Device connected");
+            } else {
+                logger.warn("Device disconnected");
+            }
+            lastConnectionStatus = currentStatus;
         }
     }
 
