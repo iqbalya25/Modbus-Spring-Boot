@@ -1,11 +1,10 @@
 package org.example.vfdcontrol.service.impl;
 
-import com.ghgande.j2mod.modbus.Modbus;
-import com.ghgande.j2mod.modbus.io.ModbusSerialTransaction;
+import com.ghgande.j2mod.modbus.ModbusException;
+import com.ghgande.j2mod.modbus.io.ModbusTCPTransaction;
 import com.ghgande.j2mod.modbus.msg.*;
-import com.ghgande.j2mod.modbus.net.SerialConnection;
+import com.ghgande.j2mod.modbus.net.TCPMasterConnection;
 import com.ghgande.j2mod.modbus.procimg.SimpleRegister;
-import com.ghgande.j2mod.modbus.util.SerialParameters;
 import org.example.vfdcontrol.service.VfdService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -13,38 +12,35 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
+import java.net.InetAddress;
 
 @Service
 public class VfdServiceImpl implements VfdService {
     private static final Logger logger = LoggerFactory.getLogger(VfdServiceImpl.class);
-    private SerialConnection connection;
+    private TCPMasterConnection connection;
     private static final int MODBUS_DELAY = 500;
-    private static final int SLAVE_ADDRESS= 1;
+    private static final int SLAVE_ADDRESS = 1;
     private boolean lastConnectionStatus = false;
 
     public VfdServiceImpl() {
-        SerialParameters params = new SerialParameters();
-        String portName = System.getenv("SERIAL_PORT");
-        if (portName == null || portName.isEmpty()) {
-            portName = "/dev/ttyS9";  // fallback to default
+        String host = System.getenv("MODBUS_HOST");
+        String portStr = System.getenv("MODBUS_PORT");
+        int port = (portStr != null && !portStr.isEmpty()) ? Integer.parseInt(portStr) : 502; // Default Modbus TCP port
+
+        if (host == null || host.isEmpty()) {
+            host = "localhost";  // fallback to default
         }
 
-        logger.info("Attempting to use port: {}", portName);
-        params.setPortName(portName);
-        params.setBaudRate(9600);
-        params.setDatabits(8);
-        params.setParity(2);  // Even parity
-        params.setStopbits(1);
-        params.setEncoding(Modbus.SERIAL_ENCODING_RTU);
-        params.setEcho(false);
-
-        connection = new SerialConnection(params);
+        logger.info("Attempting to connect to Modbus TCP at {}:{}", host, port);
         try {
-            connection.open();
+            InetAddress addr = InetAddress.getByName(host);
+            connection = new TCPMasterConnection(addr);
+            connection.setPort(port);
+            connection.connect();
             lastConnectionStatus = true;
-            logger.info("Serial connection opened successfully on port: {}", portName);
+            logger.info("Modbus TCP connection established successfully to {}:{}", host, port);
         } catch (Exception e) {
-            logger.error("Failed to open serial connection on port: {}", portName, e);
+            logger.error("Failed to establish Modbus TCP connection to {}:{}", host, port, e);
             lastConnectionStatus = false;
         }
     }
@@ -107,13 +103,12 @@ public class VfdServiceImpl implements VfdService {
 
     private ModbusResponse executeTransaction(ModbusRequest request) throws IOException {
         ensureConnection();
-        ModbusSerialTransaction trans = new ModbusSerialTransaction(connection);
+        ModbusTCPTransaction trans = new ModbusTCPTransaction(connection);
         trans.setRequest(request);
         trans.setRetries(5);
         try {
             logger.debug("Executing Modbus transaction: {}", request);
             trans.execute();
-
 
             // Add delay after sending request
             Thread.sleep(MODBUS_DELAY);
@@ -130,10 +125,10 @@ public class VfdServiceImpl implements VfdService {
     private void ensureConnection() throws IOException {
         if (!isConnected()) {
             try {
-                connection.open();
-                logger.info("Reopened serial connection");
+                connection.connect();
+                logger.info("Reopened Modbus TCP connection");
             } catch (Exception e) {
-                logger.error("Failed to reopen serial connection", e);
+                logger.error("Failed to reopen Modbus TCP connection", e);
                 throw new IOException("Failed to connect to VFD", e);
             }
         }
@@ -141,17 +136,17 @@ public class VfdServiceImpl implements VfdService {
 
     @Override
     public boolean isConnected() {
-        return connection != null && connection.isOpen();
+        return connection != null && connection.isConnected();
     }
 
     @Override
     public void connect() throws IOException {
         if (!isConnected()) {
             try {
-                connection.open();
-                logger.info("Serial connection opened successfully");
+                connection.connect();
+                logger.info("Modbus TCP connection opened successfully");
             } catch (Exception e) {
-                logger.error("Failed to open serial connection", e);
+                logger.error("Failed to open Modbus TCP connection", e);
                 throw new IOException("Failed to connect to VFD", e);
             }
         }
@@ -162,9 +157,9 @@ public class VfdServiceImpl implements VfdService {
         if (isConnected()) {
             try {
                 connection.close();
-                logger.info("Serial connection closed successfully");
+                logger.info("Modbus TCP connection closed successfully");
             } catch (Exception e) {
-                logger.error("Failed to close serial connection", e);
+                logger.error("Failed to close Modbus TCP connection", e);
                 throw new IOException("Failed to disconnect from VFD", e);
             }
         }

@@ -4,9 +4,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    devices:
-      - "COM9:/dev/ttyS9"
     environment:
-      - SERIAL_PORT=/dev/ttyS9
-    privileged: true
+      - MODBUS_HOST=192.168.1.42
+      - MODBUS_PORT=23
+    network_mode: "host"
     restart: unless-stopped
