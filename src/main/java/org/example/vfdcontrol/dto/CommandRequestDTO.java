@@ -1,19 +1,13 @@
 package org.example.vfdcontrol.dto;
 
 public class CommandRequestDTO {
-    private int command;
+    private String command;
 
-    public CommandRequestDTO() {}
-
-    public CommandRequestDTO(int command) {
-        this.command = command;
-    }
-
-    public int getCommand() {
+    public String getCommand() {
         return command;
     }
 
-    public void setCommand(int command) {
+    public void setCommand(String command) {
         this.command = command;
     }
 }

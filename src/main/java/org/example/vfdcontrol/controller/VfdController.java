@@ -1,11 +1,12 @@
 package org.example.vfdcontrol.controller;
 
-import jdk.jfr.Frequency;
 import org.example.vfdcontrol.dto.CommandRequestDTO;
-import org.example.vfdcontrol.dto.FrequencyRequestDTO;
-import org.example.vfdcontrol.dto.FrequencyResponseDTO;
+import org.example.vfdcontrol.dto.ModbusTcpDTO;
 import org.example.vfdcontrol.service.VfdService;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+
+import java.io.IOException;
 
 @RestController
 @RequestMapping("api/v1/vfdcontrol")
@@ -17,39 +18,30 @@ public class VfdController {
         this.vfdService = vfdService;
     }
 
-    @PostMapping("/frequency")
-    public void setFrequency(@RequestBody FrequencyRequestDTO frequencyRequestDTO) {
+    @PostMapping("/button")
+    public ResponseEntity<String> executeCommand(@RequestBody CommandRequestDTO command) {
         try {
-            vfdService.setFrequency(frequencyRequestDTO.getFrequency());
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-    }
-
-    @PostMapping("/command")
-    public void sendCommand(@RequestBody CommandRequestDTO commandRequestDTO) {
-        try {
-            vfdService.sendCommand(commandRequestDTO.getCommand());
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-    }
-
-    @GetMapping("/frequency")
-    public FrequencyResponseDTO getFrequency() {
-        try {
-            int frequency = vfdService.readFrequency();
-            return new FrequencyResponseDTO(frequency);
-        } catch (Exception e) {
-            e.printStackTrace();
-            return new FrequencyResponseDTO(-1); // Indicate failure
+            if ("ON".equalsIgnoreCase(command.getCommand())) {
+                vfdService.turnOn();
+                return ResponseEntity.ok("Device turned on successfully");
+            } else if ("OFF".equalsIgnoreCase(command.getCommand())) {
+                vfdService.turnOff();
+                return ResponseEntity.ok("Device turned off successfully");
+            } else {
+                return ResponseEntity.badRequest().body("Invalid command. Use 'ON' or 'OFF'.");
+            }
+        } catch (IOException e) {
+            return ResponseEntity.internalServerError().body("Error executing command: " + e.getMessage());
         }
     }
 
     @GetMapping("/status")
-    public String getConnectionStatus() {
-        return vfdService.isConnected() ? "Connected" : "Disconnected";
+    public ResponseEntity<ModbusTcpDTO.LampStatusResponse> getLampStatus() {
+        try {
+            boolean status = vfdService.getLampStatus();
+            return ResponseEntity.ok(new ModbusTcpDTO.LampStatusResponse(status));
+        } catch (IOException e) {
+            return ResponseEntity.internalServerError().body(null);
+        }
     }
-
-
 }

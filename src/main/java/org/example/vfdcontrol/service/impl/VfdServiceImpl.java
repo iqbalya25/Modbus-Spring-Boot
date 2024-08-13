@@ -4,11 +4,9 @@ import com.ghgande.j2mod.modbus.ModbusException;
 import com.ghgande.j2mod.modbus.io.ModbusTCPTransaction;
 import com.ghgande.j2mod.modbus.msg.*;
 import com.ghgande.j2mod.modbus.net.TCPMasterConnection;
-import com.ghgande.j2mod.modbus.procimg.SimpleRegister;
 import org.example.vfdcontrol.service.VfdService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -17,151 +15,106 @@ import java.net.InetAddress;
 @Service
 public class VfdServiceImpl implements VfdService {
     private static final Logger logger = LoggerFactory.getLogger(VfdServiceImpl.class);
+    private static final String IP_ADDRESS = "192.168.1.111";
+    private static final int PORT = 502;
+    private static final int SLAVE_ID = 1;
+    private static final int BUTTON_ON_COIL = 3072;
+    private static final int BUTTON_OFF_COIL = 3073;
+    private static final int LAMP_STATUS_REGISTER = 1536;
+    private static final int PULSE_DURATION_MS = 100; // Duration of the momentary pulse
+
     private TCPMasterConnection connection;
-    private static final int MODBUS_DELAY = 500;
-    private static final int SLAVE_ADDRESS = 1;
-    private boolean lastConnectionStatus = false;
 
     public VfdServiceImpl() {
-        String host = System.getenv("MODBUS_HOST");
-        String portStr = System.getenv("MODBUS_PORT");
-        int port = (portStr != null && !portStr.isEmpty()) ? Integer.parseInt(portStr) : 502; // Default Modbus TCP port
-
-        if (host == null || host.isEmpty()) {
-            host = "localhost";  // fallback to default
-        }
-
-        logger.info("Attempting to connect to Modbus TCP at {}:{}", host, port);
         try {
-            InetAddress addr = InetAddress.getByName(host);
+            InetAddress addr = InetAddress.getByName(IP_ADDRESS);
             connection = new TCPMasterConnection(addr);
-            connection.setPort(port);
+            connection.setPort(PORT);
             connection.connect();
-            lastConnectionStatus = true;
-            logger.info("Modbus TCP connection established successfully to {}:{}", host, port);
+            logger.info("Successfully connected to Modbus device at {}:{}", IP_ADDRESS, PORT);
         } catch (Exception e) {
-            logger.error("Failed to establish Modbus TCP connection to {}:{}", host, port, e);
-            lastConnectionStatus = false;
-        }
-    }
-
-    @Scheduled(fixedDelay = 5000)
-    public void monitorConnectionStatus() {
-        boolean currentStatus = isConnected();
-        if (currentStatus != lastConnectionStatus) {
-            if (currentStatus) {
-                logger.info("Device connected");
-            } else {
-                logger.warn("Device disconnected");
-            }
-            lastConnectionStatus = currentStatus;
+            logger.error("Failed to initialize Modbus connection", e);
         }
     }
 
     @Override
-    public void setFrequency(int frequency) throws IOException, IllegalArgumentException {
-        if (frequency < 0 || frequency > 6000) { // Adjust range as needed
-            throw new IllegalArgumentException("Frequency must be between 0 and 400 Hz");
-        }
-        logger.info("Attempting to set frequency to: {}", frequency);
-        int registerAddress = 14; // Frequency control register
-        ModbusRequest request = new WriteSingleRegisterRequest(registerAddress, new SimpleRegister(frequency));
-        request.setUnitID(SLAVE_ADDRESS);
-        executeTransaction(request);
-        logger.info("Frequency set successfully");
+    public void turnOn() throws IOException {
+        sendMomentaryPulse(BUTTON_ON_COIL);
     }
 
     @Override
-    public void sendCommand(int command) throws IOException, IllegalArgumentException {
-        if (command < 0 || command > 65535) { // Adjust range as needed
-            throw new IllegalArgumentException("Invalid command value");
-        }
-        logger.info("Sending command: {}", command);
-        int registerAddress = 8; // Command control register
-        ModbusRequest request = new WriteSingleRegisterRequest(registerAddress, new SimpleRegister(command));
-        request.setUnitID(SLAVE_ADDRESS);
-        executeTransaction(request);
-        logger.info("Command sent successfully");
+    public void turnOff() throws IOException {
+        sendMomentaryPulse(BUTTON_OFF_COIL);
     }
 
     @Override
-    public int readFrequency() throws IOException {
-        logger.info("Reading frequency");
-        int registerAddress = 200; // Frequency control register
-        ModbusRequest request = new ReadMultipleRegistersRequest(registerAddress, 1);
-        request.setUnitID(SLAVE_ADDRESS);
-        ModbusResponse response = executeTransaction(request);
-        if (response instanceof ReadMultipleRegistersResponse) {
-            ReadMultipleRegistersResponse readResponse = (ReadMultipleRegistersResponse) response;
-            int frequency = readResponse.getRegisterValue(0);
-            logger.info("Frequency read: {}", frequency);
-            return frequency;
-        }
-        logger.warn("Unexpected response type when reading frequency");
-        return -1;
+    public boolean getLampStatus() throws IOException {
+        int status = readRegister(LAMP_STATUS_REGISTER);
+        return status == 1;
     }
 
-    private ModbusResponse executeTransaction(ModbusRequest request) throws IOException {
-        ensureConnection();
-        ModbusTCPTransaction trans = new ModbusTCPTransaction(connection);
-        trans.setRequest(request);
-        trans.setRetries(5);
+    private void sendMomentaryPulse(int coil) throws IOException {
         try {
-            logger.debug("Executing Modbus transaction: {}", request);
-            trans.execute();
+            // Turn the coil ON
+            writeCoil(coil, true);
 
-            // Add delay after sending request
-            Thread.sleep(MODBUS_DELAY);
+            // Wait for the pulse duration
+            Thread.sleep(PULSE_DURATION_MS);
 
-            ModbusResponse response = trans.getResponse();
-            logger.debug("Received Modbus response: {}", response);
-            return response;
+            // Turn the coil OFF
+            writeCoil(coil, false);
+
+            logger.info("Successfully sent momentary pulse to coil {}", coil);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            logger.error("Interrupted while sending momentary pulse to coil {}", coil, e);
+            throw new IOException("Failed to send momentary pulse", e);
+        }
+    }
+
+    private void writeCoil(int coil, boolean state) throws IOException {
+        try {
+            if (!connection.isConnected()) {
+                connection.connect();
+            }
+            WriteCoilRequest req = new WriteCoilRequest(coil, state);
+            req.setUnitID(SLAVE_ID);
+            ModbusResponse response = executeTransaction(req);
+            if (!(response instanceof WriteCoilResponse)) {
+                throw new IOException("Unexpected response type");
+            }
+            logger.info("Successfully wrote to coil {}: {}", coil, state);
         } catch (Exception e) {
-            logger.error("Error executing Modbus transaction: {}", request, e);
-            throw new IOException("Error communicating with VFD", e);
+            logger.error("Error writing to coil {}", coil, e);
+            throw new IOException("Failed to write to coil", e);
         }
     }
 
-    private void ensureConnection() throws IOException {
-        if (!isConnected()) {
-            try {
+    private int readRegister(int register) throws IOException {
+        try {
+            if (!connection.isConnected()) {
                 connection.connect();
-                logger.info("Reopened Modbus TCP connection");
-            } catch (Exception e) {
-                logger.error("Failed to reopen Modbus TCP connection", e);
-                throw new IOException("Failed to connect to VFD", e);
             }
+            ReadMultipleRegistersRequest req = new ReadMultipleRegistersRequest(register, 1);
+            req.setUnitID(SLAVE_ID);
+            ModbusResponse response = executeTransaction(req);
+            if (response instanceof ReadMultipleRegistersResponse) {
+                ReadMultipleRegistersResponse readResponse = (ReadMultipleRegistersResponse) response;
+                int value = readResponse.getRegisterValue(0);
+                logger.info("Successfully read from register {}: {}", register, value);
+                return value;
+            }
+            throw new IOException("Unexpected response type");
+        } catch (Exception e) {
+            logger.error("Error reading from register {}", register, e);
+            throw new IOException("Failed to read from register", e);
         }
     }
 
-    @Override
-    public boolean isConnected() {
-        return connection != null && connection.isConnected();
-    }
-
-    @Override
-    public void connect() throws IOException {
-        if (!isConnected()) {
-            try {
-                connection.connect();
-                logger.info("Modbus TCP connection opened successfully");
-            } catch (Exception e) {
-                logger.error("Failed to open Modbus TCP connection", e);
-                throw new IOException("Failed to connect to VFD", e);
-            }
-        }
-    }
-
-    @Override
-    public void disconnect() throws IOException {
-        if (isConnected()) {
-            try {
-                connection.close();
-                logger.info("Modbus TCP connection closed successfully");
-            } catch (Exception e) {
-                logger.error("Failed to close Modbus TCP connection", e);
-                throw new IOException("Failed to disconnect from VFD", e);
-            }
-        }
+    private ModbusResponse executeTransaction(ModbusRequest request) throws ModbusException {
+        ModbusTCPTransaction transaction = new ModbusTCPTransaction(connection);
+        transaction.setRequest(request);
+        transaction.execute();
+        return transaction.getResponse();
     }
 }
